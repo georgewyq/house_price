@@ -248,7 +248,9 @@ all_data$FinalPrice <- all_data$SalePrice - all_data$MiscVal
 all_cov$flag <- all_data$flag
 all_cov$Id <- all_data$Id
 all_cov$FinalPrice <- all_data$FinalPrice
+all_cov$MiscVal <- all_data$MiscVal
 
+set.seed(1000)
 my_train <- all_cov %>% filter(flag == "train") %>% sample_frac(0.8)
 my_valid <- all_cov %>% filter(flag == "train", !(Id %in% my_train$Id))
 
@@ -256,39 +258,55 @@ my_valid <- all_cov %>% filter(flag == "train", !(Id %in% my_train$Id))
 rf <- 
   randomForest(
     x=my_train[, predictors], 
-    y=my_train$FinalPrice, 
+    y=log(my_train$FinalPrice), 
     xtest = my_valid[, predictors],
-    ytest = my_valid$FinalPrice,
-    ntree=500,
+    ytest = log(my_valid$FinalPrice),
+    ntree=1000,
     importance = TRUE,
     keep.forest = TRUE)
 error <- plot(rf)
-plot(100:500, error[100:500], type = "l")
+plot(100:1000, error[100:1000], type = "l")
 importance(rf)
 varImpPlot(rf)
 
 ### now fit residual again
-res <- my_train$FinalPrice - predict(rf)
-res.test <- my_valid$FinalPrice - predict(rf, newdata = my_valid)
+res <- my_train$FinalPrice - exp(predict(rf))
+res.test <- my_valid$FinalPrice - exp(predict(rf, newdata = my_valid))
+res <- log(my_train$FinalPrice) - predict(rf)
+res.test <- log(my_valid$FinalPrice) - predict(rf, newdata = my_valid)
+
 rf2 <- 
   randomForest(
     x=my_train[, predictors], 
     y=res,
     xtest=my_valid[, predictors],
     ytest=res.test,
-    ntree=500,
+    ntree=1000,
     importance=TRUE,
     keep.forest = TRUE)
 error2 <- plot(rf2)
-plot(100:500, error2[100:500], type = "l")
+plot(200:1000, error2[200:1000], type = "l")
 importance(rf2)
 varImpPlot(rf2)
 
+res2 <- log(my_train$FinalPrice) - predict(rf) - predict(rf2)
+res2.test <- log(my_valid$FinalPrice) - predict(rf, newdata = my_valid) - predict(rf2, newdata = my_valid)
+plot(res2, my_train$FinalPrice)
+plot(predict(rf) + predict(rf2), log(my_train$FinalPrice))
+plot(predict(rf, newdata = my_valid) + predict(rf2, newdata = my_valid), log(my_valid$FinalPrice))
+
+my_train[res2 < -0.5, "FinalPrice"]
+exp(predict(rf) + predict(rf2))[res2 < -0.5]
+my_train[res2 < -0.5, ]
+my_train[res2 < -0.5, "MiscVal"]
+
 pred <- 
-  predict(rf, all_cov[all_cov$flag == "test", predictors]) + 
-  predict(rf2, all_cov[all_cov$flag == "test", predictors]) + 
+  exp(
+    predict(rf, all_cov[all_cov$flag == "test", predictors]) + 
+    predict(rf2, all_cov[all_cov$flag == "test", predictors])) + 
   all_data[all_data$flag == "test", "MiscVal"]
-write.csv(pred, "second_prediction.csv")
+pred.table <- data.frame(Id = all_cov[all_cov$flag == "test", "Id"], SalePrice = pred)
+write.csv(pred.table, "third_prediction.csv",row.names = FALSE)
 
 library("party")
 x <- ctree(FinalPrice ~ ., data=my_train[, c(predictors, "FinalPrice")])
